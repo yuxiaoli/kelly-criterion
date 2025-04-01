@@ -31,26 +31,28 @@
 """Kelly Criterion - (c) 2014-2019, Tibor Kiss <tibor.kiss@gmail.com>
 
 Usage:
-  kelly_criterion [options] <start-date> <end-date> <security>...
+  python kelly_criterion.py [-h] [--risk-free-rate RATE] start_date end_date security [security ...]
 
 Options:
-  --risk-free-rate=<pct>  Annualized percentage of the Risk Free Rate.
-                          [default: 0.04]
-
+  --risk-free-rate RATE  Annualized percentage of the Risk Free Rate (default: 0.04)
 """
 
 import sys
-from datetime import datetime, date
+import os
+from datetime import datetime, date, timedelta
 from typing import Set, Dict
 import logging
-
-from docopt import docopt
+import argparse
 
 from pandas import DataFrame
 from numpy.linalg import inv
-from iexfinance.stocks import get_historical_data
+from polygon import RESTClient
+from dotenv import load_dotenv
 
 log = logging.getLogger(__name__)
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 def calc_kelly_leverages(securities: Set[str],
@@ -66,15 +68,45 @@ def calc_kelly_leverages(securities: Set[str],
     f = {}
     ret = {}
     excess_return = {}
+    
+    # Get API key from environment variables
+    api_key = os.getenv("API_KEY")
+    if not api_key:
+        raise ValueError("API_KEY environment variable not set. Please create a .env file with your Polygon API key.")
+    
+    # Create Polygon REST client
+    client = RESTClient(api_key)
 
-    # Download the historical prices from Yahoo Finance and calculate the
+    # Download the historical prices and calculate the
     # excess return (return of security - risk free rate) for each security.
     for symbol in securities:
         try:
-            hist_prices = get_historical_data(
-                symbol, start=start_date, end=end_date,
-                output_format='pandas')
-        except IOError as e:
+            # Polygon requires a time delta, so we add one day to end_date to include it
+            aggs = client.get_aggs(
+                ticker=symbol,
+                multiplier=1,
+                timespan="day",
+                from_=start_date.strftime("%Y-%m-%d"),
+                to=(end_date + timedelta(days=1)).strftime("%Y-%m-%d")
+            )
+            
+            # Convert to DataFrame
+            hist_prices = DataFrame([{
+                'date': datetime.fromtimestamp(agg.timestamp/1000).date(),
+                'close': agg.close,
+                'volume': agg.volume,
+                'open': agg.open,
+                'high': agg.high,
+                'low': agg.low
+            } for agg in aggs])
+            
+            # Set date as index
+            if not hist_prices.empty:
+                hist_prices.set_index('date', inplace=True)
+            else:
+                raise ValueError(f"No data returned for {symbol}")
+                
+        except Exception as e:
             raise ValueError(f'Unable to download data for {symbol}. '
                              f'Reason: {str(e)}')
 
@@ -104,15 +136,25 @@ def main():
     logging.basicConfig(level=logging.INFO)
 
     log.info("Kelly Criterion calculation")
-    args = docopt(__doc__, sys.argv[1:])
+    
+    # Get default dates
+    today = date.today()
+    five_years_ago = today.replace(year=today.year - 5)
+    
+    # Replace docopt with argparse
+    parser = argparse.ArgumentParser(description="Kelly Criterion calculation")
+    parser.add_argument('--risk-free-rate', type=float, default=0.04,
+                        help='Annualized percentage of the Risk Free Rate (default: 0.04)')
+    parser.add_argument('--start-date', default=five_years_ago.strftime("%Y-%m-%d"),
+                        help=f'Start date in YYYY-MM-DD format (default: {five_years_ago.strftime("%Y-%m-%d")})')
+    parser.add_argument('--end-date', default=today.strftime("%Y-%m-%d"),
+                        help=f'End date in YYYY-MM-DD format (default: {today.strftime("%Y-%m-%d")})')
+    parser.add_argument('securities', nargs='+', help='List of securities to analyze')
+    
+    args = parser.parse_args()
 
     # Parse risk-free-rate
-    try:
-        risk_free_rate = float(args['--risk-free-rate'])
-    except ValueError:
-        log.error(f"Error converting risk-free-rate to float: "
-                  f"{args['--risk-free-rate']}")
-        sys.exit(-1)
+    risk_free_rate = args.risk_free_rate
 
     # Verify risk-free-rate
     if not 0 <= risk_free_rate <= 1.0:
@@ -122,28 +164,28 @@ def main():
 
     # Parse start and end dates
     try:
-        start_date = datetime.strptime(args['<start-date>'], "%Y-%m-%d").date()
+        start_date = datetime.strptime(args.start_date, "%Y-%m-%d").date()
     except ValueError:
-        log.error(f"Error parsing start-date: {args['<start-date>']}")
+        log.error(f"Error parsing start-date: {args.start_date}")
         sys.exit(-1)
 
     try:
-        end_date = datetime.strptime(args['<end-date>'], "%Y-%m-%d").date()
+        end_date = datetime.strptime(args.end_date, "%Y-%m-%d").date()
     except ValueError:
-        log.error(f"Error parsing end-date: {args['<start-date>']}")
+        log.error(f"Error parsing end-date: {args.end_date}")
         sys.exit(-1)
 
     log.info(
         f"Arguments: "
-        f"risk-free-rate={args['--risk-free-rate']} "
+        f"risk-free-rate={risk_free_rate} "
         f"start-date={start_date} "
         f"end-date={end_date} "
-        f"securities={args['<security>']}")
+        f"securities={args.securities}")
 
     # Calculate the Kelly Optimal leverages
     try:
         leverages = calc_kelly_leverages(
-            args['<security>'], start_date, end_date, risk_free_rate)
+            args.securities, start_date, end_date, risk_free_rate)
     except ValueError as e:
         log.error(f"Error during Kelly calculation: {str(e)}")
         sys.exit(-1)
@@ -152,11 +194,19 @@ def main():
     if leverages:
         log.info("Leverages per security:")
         sum_leverage = 0
+        positive_leverage = 0
+        negative_leverage = 0
+        
         for symbol, leverage in leverages.items():
             sum_leverage += leverage
+            if leverage > 0:
+                positive_leverage += leverage
+            else:
+                negative_leverage += abs(leverage)
             log.info(f"  {symbol}: {leverage:.2f}")
 
         log.info(f"Sum leverage: {sum_leverage}")
+        log.info(f"Total exposure: {positive_leverage + negative_leverage:.2f} (Long: {positive_leverage:.2f}, Short: {negative_leverage:.2f})")
 
 
 if __name__ == '__main__':
