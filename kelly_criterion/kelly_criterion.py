@@ -39,6 +39,7 @@ Options:
 
 import sys
 import os
+import requests
 from datetime import datetime, date, timedelta
 from typing import Set, Dict
 import logging
@@ -53,6 +54,41 @@ log = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
+
+
+def get_latest_risk_free_rate() -> float:
+    """Fetch the latest risk-free rate from the US Treasury API."""
+    try:
+        # URL to fetch the latest interest rate
+        url = ("https://api.fiscaldata.treasury.gov/services/api/fiscal_service/"
+               "v2/accounting/od/avg_interest_rates?sort=-record_date&format=json&page[number]=1&page[size]=1")
+
+        # Send a GET request to the API
+        response = requests.get(url)
+
+        # Check if the request was successful
+        if response.status_code == 200:
+            # Parse the JSON response
+            data = response.json()
+            
+            # Check if the data key exists and contains records
+            if data.get("data") and len(data["data"]) > 0:
+                latest_record = data["data"][0]
+                interest_rate = latest_record.get("avg_interest_rate_amt")
+                record_date = latest_record.get("record_date")
+                
+                if interest_rate is not None:
+                    # Convert from percentage to decimal
+                    rate = float(interest_rate) / 100
+                    log.info(f"Using latest risk-free rate from Treasury ({record_date}): {interest_rate}%")
+                    return rate
+        
+        # If we couldn't get the rate, use the default
+        log.warning("Could not fetch latest risk-free rate, using default value of 0.04")
+        return 0.04
+    except Exception as e:
+        log.warning(f"Error fetching risk-free rate: {str(e)}. Using default value of 0.04")
+        return 0.04
 
 
 def calc_kelly_leverages(securities: Set[str],
@@ -141,10 +177,13 @@ def main():
     today = date.today()
     five_years_ago = today.replace(year=today.year - 5)
     
+    # Get the latest risk-free rate as default
+    default_risk_free_rate = get_latest_risk_free_rate()
+    
     # Replace docopt with argparse
     parser = argparse.ArgumentParser(description="Kelly Criterion calculation")
-    parser.add_argument('--risk-free-rate', type=float, default=0.04,
-                        help='Annualized percentage of the Risk Free Rate (default: 0.04)')
+    parser.add_argument('--risk-free-rate', type=float, default=default_risk_free_rate,
+                        help=f'Annualized percentage of the Risk Free Rate (default: {default_risk_free_rate:.4f})')
     parser.add_argument('--start-date', default=five_years_ago.strftime("%Y-%m-%d"),
                         help=f'Start date in YYYY-MM-DD format (default: {five_years_ago.strftime("%Y-%m-%d")})')
     parser.add_argument('--end-date', default=today.strftime("%Y-%m-%d"),
