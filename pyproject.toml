@@ -1,19 +1,31 @@
-[tool.poetry]
+[project]
 name = "kelly-criterion"
 version = "0.1.0"
-description = ""
-authors = ["sean <sean.li@vectorindex.cloud>"]
+description = "Money management strategy based on Kelly J. L.'s formula"
 readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    {name = "sean", email = "sean.li@vectorindex.cloud"}
+]
+dependencies = [
+    "pandas>=2.2.3",
+    "numpy>=2.2.4",
+    "polygon-api-client>=1.14.4",
+    "python-dotenv>=1.1.0",
+    "requests>=2.32.3",
+]
 
-[tool.poetry.dependencies]
-python = "^3.11"
-pandas = "^2.2.3"
-numpy = "^2.2.4"
-polygon-api-client = "^1.14.4"
-python-dotenv = "^1.1.0"
-requests = "^2.32.3"
-
+[project.scripts]
+kelly_criterion = "kelly_criterion.kelly_criterion:main"
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=4.2.1",
+    "pylint>=2.2.2",
+    "flake8",
+    "ruff>=0.15.0",
+]

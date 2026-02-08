@@ -21,16 +21,28 @@ Reference (Matlab) implementation was taken from Ernie Chan's Quantitative Tradi
 
 Installation
 ------------
-`pip install kelly_criterion`
+This project is managed with `uv`.
+
+```bash
+# Install uv
+pip install uv
+
+# Install project
+uv sync
+```
 
 Usage
 -----
-`kelly_criterion [--risk-free-rate=<pct>] <start-date> <end-date> <security>...`
+Run with `uv run`:
+
+```bash
+uv run kelly_criterion [--risk-free-rate=<pct>] <start-date> <end-date> <security>...
+```
 
 Example
 -------
 ```
-$ kelly_criterion --risk-free-rate 0.04 2001-02-26 2014-12-28 IBB VDE SPY
+$ uv run kelly_criterion --risk-free-rate 0.04 2001-02-26 2014-12-28 IBB VDE SPY
 Kelly Criterion calculation
 Arguments: risk-free-rate=0.04 start-date=2001-02-26 end-date=2014-12-28 securities=['IBB', 'VDE', 'SPY']
 
@@ -41,12 +53,30 @@ Leverages per security:
 Sum leverage: 1.92
 ```
 
+Development
+-----------
+This project uses `uv` for dependency management.
+
+```bash
+# Install dependencies including dev
+uv sync
+
+# Run tests
+uv run pytest
+
+# Linting
+uv run pylint kelly_criterion tests
+uv run flake8
+```
+
 Dependencies
 ------------
-  * Python 2.7
+  * Python >= 3.11
   * [Numpy](http://www.numpy.org/)
   * [Pandas](http://pandas.pydata.org/)
-  * [Docopt](http://docopt.org/)
+  * [Polygon API Client](https://github.com/polygon-io/client-python)
+  * [Python Dotenv](https://github.com/theskumar/python-dotenv)
+  * [Requests](https://requests.readthedocs.io/)
 
 References
 ----------

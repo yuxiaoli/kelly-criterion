@@ -60,8 +60,10 @@ def get_latest_risk_free_rate() -> float:
     """Fetch the latest risk-free rate from the US Treasury API."""
     try:
         # URL to fetch the latest interest rate
-        url = ("https://api.fiscaldata.treasury.gov/services/api/fiscal_service/"
-               "v2/accounting/od/avg_interest_rates?sort=-record_date&format=json&page[number]=1&page[size]=1")
+        url = (
+            "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/"
+            "v2/accounting/od/avg_interest_rates?sort=-record_date&format=json&page[number]=1&page[size]=1"
+        )
 
         # Send a GET request to the API
         response = requests.get(url)
@@ -70,31 +72,36 @@ def get_latest_risk_free_rate() -> float:
         if response.status_code == 200:
             # Parse the JSON response
             data = response.json()
-            
+
             # Check if the data key exists and contains records
             if data.get("data") and len(data["data"]) > 0:
                 latest_record = data["data"][0]
                 interest_rate = latest_record.get("avg_interest_rate_amt")
                 record_date = latest_record.get("record_date")
-                
+
                 if interest_rate is not None:
                     # Convert from percentage to decimal
                     rate = float(interest_rate) / 100
-                    log.info(f"Using latest risk-free rate from Treasury ({record_date}): {interest_rate}%")
+                    log.info(
+                        f"Using latest risk-free rate from Treasury ({record_date}): {interest_rate}%"
+                    )
                     return rate
-        
+
         # If we couldn't get the rate, use the default
-        log.warning("Could not fetch latest risk-free rate, using default value of 0.04")
+        log.warning(
+            "Could not fetch latest risk-free rate, using default value of 0.04"
+        )
         return 0.04
     except Exception as e:
-        log.warning(f"Error fetching risk-free rate: {str(e)}. Using default value of 0.04")
+        log.warning(
+            f"Error fetching risk-free rate: {str(e)}. Using default value of 0.04"
+        )
         return 0.04
 
 
-def calc_kelly_leverages(securities: Set[str],
-                         start_date: date,
-                         end_date: date,
-                         risk_free_rate: float = 0.04) -> Dict[str, float]:
+def calc_kelly_leverages(
+    securities: Set[str], start_date: date, end_date: date, risk_free_rate: float = 0.04
+) -> Dict[str, float]:
     """Calculates the optimal leverages for the given securities and
     time frame. Returns a list of (security, leverage) tuple with the
     calculate optimal leverages.
@@ -104,12 +111,14 @@ def calc_kelly_leverages(securities: Set[str],
     f = {}
     ret = {}
     excess_return = {}
-    
+
     # Get API key from environment variables
     api_key = os.getenv("API_KEY")
     if not api_key:
-        raise ValueError("API_KEY environment variable not set. Please create a .env file with your Polygon API key.")
-    
+        raise ValueError(
+            "API_KEY environment variable not set. Please create a .env file with your Polygon API key."
+        )
+
     # Create Polygon REST client
     client = RESTClient(api_key)
 
@@ -123,34 +132,38 @@ def calc_kelly_leverages(securities: Set[str],
                 multiplier=1,
                 timespan="day",
                 from_=start_date.strftime("%Y-%m-%d"),
-                to=(end_date + timedelta(days=1)).strftime("%Y-%m-%d")
+                to=(end_date + timedelta(days=1)).strftime("%Y-%m-%d"),
             )
-            
+
             # Convert to DataFrame
-            hist_prices = DataFrame([{
-                'date': datetime.fromtimestamp(agg.timestamp/1000).date(),
-                'close': agg.close,
-                'volume': agg.volume,
-                'open': agg.open,
-                'high': agg.high,
-                'low': agg.low
-            } for agg in aggs])
-            
+            hist_prices = DataFrame(
+                [
+                    {
+                        "date": datetime.fromtimestamp(agg.timestamp / 1000).date(),
+                        "close": agg.close,
+                        "volume": agg.volume,
+                        "open": agg.open,
+                        "high": agg.high,
+                        "low": agg.low,
+                    }
+                    for agg in aggs
+                ]
+            )
+
             # Set date as index
             if not hist_prices.empty:
-                hist_prices.set_index('date', inplace=True)
+                hist_prices.set_index("date", inplace=True)
             else:
                 raise ValueError(f"No data returned for {symbol}")
-                
+
         except Exception as e:
-            raise ValueError(f'Unable to download data for {symbol}. '
-                             f'Reason: {str(e)}')
+            raise ValueError(f"Unable to download data for {symbol}. Reason: {str(e)}")
 
         f[symbol] = hist_prices
 
-        ret[symbol] = hist_prices['close'].pct_change()
+        ret[symbol] = hist_prices["close"].pct_change()
         # risk_free_rate is annualized
-        excess_return[symbol] = (ret[symbol] - (risk_free_rate / 252))
+        excess_return[symbol] = ret[symbol] - (risk_free_rate / 252)
 
     # Create a new DataFrame based on the Excess Returns.
     df = DataFrame(excess_return).dropna()
@@ -163,8 +176,9 @@ def calc_kelly_leverages(securities: Set[str],
     F = inv(C).dot(M)
 
     # Return a list of (security, leverage) tuple
-    return {security: leverage
-            for security, leverage in zip(df.columns.values.tolist(), F)}
+    return {
+        security: leverage for security, leverage in zip(df.columns.values.tolist(), F)
+    }
 
 
 def main():
@@ -172,24 +186,34 @@ def main():
     logging.basicConfig(level=logging.INFO)
 
     log.info("Kelly Criterion calculation")
-    
+
     # Get default dates
     today = date.today()
     five_years_ago = today.replace(year=today.year - 5)
-    
+
     # Get the latest risk-free rate as default
     default_risk_free_rate = get_latest_risk_free_rate()
-    
+
     # Replace docopt with argparse
     parser = argparse.ArgumentParser(description="Kelly Criterion calculation")
-    parser.add_argument('--risk-free-rate', type=float, default=default_risk_free_rate,
-                        help=f'Annualized percentage of the Risk Free Rate (default: {default_risk_free_rate:.4f})')
-    parser.add_argument('--start-date', default=five_years_ago.strftime("%Y-%m-%d"),
-                        help=f'Start date in YYYY-MM-DD format (default: {five_years_ago.strftime("%Y-%m-%d")})')
-    parser.add_argument('--end-date', default=today.strftime("%Y-%m-%d"),
-                        help=f'End date in YYYY-MM-DD format (default: {today.strftime("%Y-%m-%d")})')
-    parser.add_argument('securities', nargs='+', help='List of securities to analyze')
-    
+    parser.add_argument(
+        "--risk-free-rate",
+        type=float,
+        default=default_risk_free_rate,
+        help=f"Annualized percentage of the Risk Free Rate (default: {default_risk_free_rate:.4f})",
+    )
+    parser.add_argument(
+        "--start-date",
+        default=five_years_ago.strftime("%Y-%m-%d"),
+        help=f"Start date in YYYY-MM-DD format (default: {five_years_ago.strftime('%Y-%m-%d')})",
+    )
+    parser.add_argument(
+        "--end-date",
+        default=today.strftime("%Y-%m-%d"),
+        help=f"End date in YYYY-MM-DD format (default: {today.strftime('%Y-%m-%d')})",
+    )
+    parser.add_argument("securities", nargs="+", help="List of securities to analyze")
+
     args = parser.parse_args()
 
     # Parse risk-free-rate
@@ -197,8 +221,7 @@ def main():
 
     # Verify risk-free-rate
     if not 0 <= risk_free_rate <= 1.0:
-        log.error(f"risk-free-rate is not in between 0 and 1: "
-                  f"{risk_free_rate:%.2f}")
+        log.error(f"risk-free-rate is not in between 0 and 1: {risk_free_rate:%.2f}")
         sys.exit(-1)
 
     # Parse start and end dates
@@ -219,12 +242,14 @@ def main():
         f"risk-free-rate={risk_free_rate} "
         f"start-date={start_date} "
         f"end-date={end_date} "
-        f"securities={args.securities}")
+        f"securities={args.securities}"
+    )
 
     # Calculate the Kelly Optimal leverages
     try:
         leverages = calc_kelly_leverages(
-            args.securities, start_date, end_date, risk_free_rate)
+            args.securities, start_date, end_date, risk_free_rate
+        )
     except ValueError as e:
         log.error(f"Error during Kelly calculation: {str(e)}")
         sys.exit(-1)
@@ -235,7 +260,7 @@ def main():
         sum_leverage = 0
         positive_leverage = 0
         negative_leverage = 0
-        
+
         for symbol, leverage in leverages.items():
             sum_leverage += leverage
             if leverage > 0:
@@ -245,8 +270,10 @@ def main():
             log.info(f"  {symbol}: {leverage:.2f}")
 
         log.info(f"Sum leverage: {sum_leverage}")
-        log.info(f"Total exposure: {positive_leverage + negative_leverage:.2f} (Long: {positive_leverage:.2f}, Short: {negative_leverage:.2f})")
+        log.info(
+            f"Total exposure: {positive_leverage + negative_leverage:.2f} (Long: {positive_leverage:.2f}, Short: {negative_leverage:.2f})"
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
