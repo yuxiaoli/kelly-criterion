@@ -191,16 +191,13 @@ def main():
     today = date.today()
     five_years_ago = today.replace(year=today.year - 5)
 
-    # Get the latest risk-free rate as default
-    default_risk_free_rate = get_latest_risk_free_rate()
-
     # Replace docopt with argparse
     parser = argparse.ArgumentParser(description="Kelly Criterion calculation")
     parser.add_argument(
         "--risk-free-rate",
         type=float,
-        default=default_risk_free_rate,
-        help=f"Annualized percentage of the Risk Free Rate (default: {default_risk_free_rate:.4f})",
+        default=None,
+        help="Annualized percentage of the Risk Free Rate (default: fetched automatically from US Treasury API)",
     )
     parser.add_argument(
         "--start-date",
@@ -217,7 +214,10 @@ def main():
     args = parser.parse_args()
 
     # Parse risk-free-rate
-    risk_free_rate = args.risk_free_rate
+    if args.risk_free_rate is None:
+        risk_free_rate = get_latest_risk_free_rate()
+    else:
+        risk_free_rate = args.risk_free_rate
 
     # Verify risk-free-rate
     if not 0 <= risk_free_rate <= 1.0:
